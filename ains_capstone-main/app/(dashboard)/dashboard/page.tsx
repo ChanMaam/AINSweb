@@ -68,7 +68,6 @@ export default function DashboardPage() {
           <div className="space-y-4">
             {[
               { time: "2 minutes ago", action: "Message sent to Client #12345", status: "success" },
-              { time: "15 minutes ago", action: "Chatbot replied to Client #67890", status: "success" },
               { time: "1 hour ago", action: "Failed delivery to Client #54321", status: "error" },
               { time: "2 hours ago", action: "Scheduled 50 messages for tomorrow", status: "info" },
             ].map((activity, index) => (
@@ -99,7 +98,6 @@ export default function DashboardPage() {
           <div className="space-y-5">
             {[
               { label: "GSM Module", status: "Connected", color: "bg-green-400" },
-              { label: "Chatbot Service", status: "Active", color: "bg-green-400" },
               { label: "Database", status: "Operational", color: "bg-green-400" },
               { label: "Message Queue", status: "Processing", color: "bg-[#E8B86D]" }, // yellow accent
             ].map((item, i) => (
