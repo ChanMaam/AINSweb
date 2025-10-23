@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle2, Upload } from "lucide-react"
+import { CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,18 +14,7 @@ const anton = Anton({ subsets: ["latin"], weight: ["400"] })
 
 export default function SettingsPage() {
   const [emailAlerts, setEmailAlerts] = useState(true)
-  const [autoReply, setAutoReply] = useState(true)
-
-  const handleUploadRules = () => {
-    const input = document.createElement("input")
-    input.type = "file"
-    input.accept = ".json,.txt"
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0]
-      if (file) console.log("Rules file selected:", file.name)
-    }
-    input.click()
-  }
+  
 
   return (
     <div className={`flex flex-col gap-8 p-8 bg-white min-h-screen text-[#0C1D40] ${inter.className}`}>
@@ -114,64 +103,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Chatbot Rules */}
-        <Card className="lg:col-span-2 rounded-2xl shadow-md">
-          <CardHeader>
-            <CardTitle className={`${anton.className}`}>Chatbot Rules Configuration</CardTitle>
-            <CardDescription>Define automated response rules</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center justify-between rounded-xl border border-gray-200 p-4">
-              <div className="space-y-0.5">
-                <Label className="text-[#0C1D40] font-medium">Auto-Reply Enabled</Label>
-                <p className="text-sm text-gray-600">Automatically respond to client messages</p>
-              </div>
-              <Switch checked={autoReply} onCheckedChange={setAutoReply} />
-            </div>
-
-            <div className="space-y-4 rounded-2xl border border-gray-200 p-4 bg-gray-50">
-              <h4 className="font-semibold text-[#0C1D40]">Current Rules</h4>
-              <div className="space-y-3">
-                {[
-                  { trigger: 'Reply "YES"', action: "Confirm attendance" },
-                  { trigger: 'Reply "NO"', action: "Mark as absent, send follow-up" },
-                  { trigger: 'Reply "RESCHEDULE"', action: "Send rescheduling options" },
-                  { trigger: 'Contains "help"', action: "Send contact information" },
-                ].map((rule, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3"
-                  >
-                    <div className="text-sm">
-                      <span className="font-semibold text-[#0C1D40]">{rule.trigger}</span>
-                      <span className="text-gray-600"> → {rule.action}</span>
-                    </div>
-                    <Button variant="ghost" size="sm" className="text-[#0C1D40] hover:text-[#E8B86D]">
-                      Edit
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={handleUploadRules}
-                variant="outline"
-                className="gap-2 border-[#0C1D40] text-[#0C1D40] hover:bg-[#0C1D40] hover:text-white"
-              >
-                <Upload className="h-4 w-4" />
-                Upload Rules File
-              </Button>
-              <Button
-                variant="outline"
-                className="border-[#E8B86D] text-[#0C1D40] hover:bg-[#E8B86D] hover:text-[#0C1D40] font-semibold"
-              >
-                Add New Rule
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Chatbot feature removed */}
       </div>
     </div>
   )

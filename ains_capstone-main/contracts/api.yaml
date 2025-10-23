@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info: { title: GSM Controller API, version: 0.1.0 }
+paths:
+  /devices:               # used by Dashboard/Settings
+    get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceList" }}}}}}
+  /contacts:              # Contacts page
+    get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ContactList" }}}}}}
+  /messaging/send:        # Messaging page "Send Now" / "Schedule"
+    post:
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SendMessageRequest" }}}}
+      responses: { "202": { description: Accepted } }
+  
+  
+  /reports/summary:       # KPI cards on Reports
+    get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ReportSummary" }}}}}}
+  /reports/failed:        # table at bottom of Reports
+    get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/FailedLogList" }}}}}}
+  /settings/status:       # Settings › GSM module card
+    get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/GsmStatus" }}}}}}
+  /settings/test-connection:
+    post: { responses: { "200": { description: OK } } }
+
+components:
+  schemas:
+    Device: { type: object, required: [id, name, signal], properties: { id:{type:string}, name:{type:string}, signal:{type:integer,min:0,max:31} } }
+    DeviceList: { type: array, items: { $ref: "#/components/schemas/Device" } }
+
+    Contact: { type: object, required:[id, assignedOfficer, status, lastContact], properties: { id:{type:string}, assignedOfficer:{type:string}, status:{type:string,enum:["Active","Inactive"]}, lastContact:{type:string,format:date} } }
+    ContactList: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+
+    SendMessageRequest: { type: object, required:[channel, content], properties: { channel:{type:string,enum:["SMS","Gmail","Both"]}, content:{type:string}, recipients:{type:array,items:{type:string}} } }
+
+
+    ReportSummary: { type: object, properties: { totalSent:{type:integer}, deliveryRate:{type:number}, autoReplyRate:{type:number}, failedCount:{type:integer} } }
+    FailedLog: { type: object, required:[clientId,message,reason,timestamp], properties: { clientId:{type:string}, message:{type:string}, reason:{type:string}, timestamp:{type:string,format:date-time} } }
+    FailedLogList: { type: array, items: { $ref: "#/components/schemas/FailedLog" } }
+
+    GsmStatus: { type: object, properties: { connected:{type:boolean}, signal:{type:string}, port:{type:string}, baud:{type:integer}, network:{type:string} } }

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { LayoutDashboard, Users, MessageSquare, Bot, BarChart3, Settings, LogOut } from "lucide-react"
+import { LayoutDashboard, Users, MessageSquare, BarChart3, Settings, LogOut } from "lucide-react"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
 
@@ -10,7 +10,6 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Contacts", href: "/contacts", icon: Users },
   { name: "Messaging", href: "/messaging", icon: MessageSquare },
-  { name: "Chatbot", href: "/chatbot", icon: Bot },
   { name: "Reports", href: "/reports", icon: BarChart3 },
   { name: "Settings", href: "/settings", icon: Settings },
 ]
