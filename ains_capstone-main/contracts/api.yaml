@@ -1,22 +1,57 @@
 openapi: 3.0.3
 info: { title: GSM Controller API, version: 0.1.0 }
+
 paths:
   /devices:               # used by Dashboard/Settings
     get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceList" }}}}}}
+
   /contacts:              # Contacts page
     get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ContactList" }}}}}}
+
   /messaging/send:        # Messaging page "Send Now" / "Schedule"
     post:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SendMessageRequest" }}}}
       responses: { "202": { description: Accepted } }
-  
-  
+
+  # -------- Rules / Auto-Reply (NEW) --------
+  /rules:
+    get:
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/RuleList" }}}
+    post:
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Rule" }}}}
+      responses: { "201": { description: Created } }
+
+  /rules/{id}:
+    patch:
+      parameters: [ { in: path, name: id, required: true, schema: { type: string } } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RulePartial" }}}}
+      responses: { "200": { description: OK } }
+    delete:
+      parameters: [ { in: path, name: id, required: true, schema: { type: string } } ]
+      responses: { "204": { description: No Content } }
+
+  # Webhook-like endpoint to process inbound client messages and emit an auto-reply
+  /incoming:
+    post:
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/IncomingMessage" }}}}
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoReplyResult" }}}
+
+  # -------- Reports / Settings (existing) --------
   /reports/summary:       # KPI cards on Reports
     get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ReportSummary" }}}}}}
+
   /reports/failed:        # table at bottom of Reports
     get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/FailedLogList" }}}}}}
+
   /settings/status:       # Settings › GSM module card
     get: { responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/GsmStatus" }}}}}}
+
   /settings/test-connection:
     post: { responses: { "200": { description: OK } } }
 
@@ -30,7 +65,65 @@ components:
 
     SendMessageRequest: { type: object, required:[channel, content], properties: { channel:{type:string,enum:["SMS","Gmail","Both"]}, content:{type:string}, recipients:{type:array,items:{type:string}} } }
 
+    # -------- Rules / Auto-Reply (NEW) --------
+    Rule:
+      type: object
+      required: [id, name, enabled, match, reply]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        match:
+          type: object
+          properties:
+            clientId: { type: string }
+            channel: { type: string, enum: ["SMS","Gmail","Both"] }
+            contains: { type: string }
+        reply:
+          type: object
+          properties:
+            template: { type: string }
+            channel: { type: string, enum: ["SMS","Gmail","Both"] }
 
+    RulePartial:
+      type: object
+      properties:
+        name: { type: string }
+        enabled: { type: boolean }
+        match:
+          type: object
+          properties:
+            clientId: { type: string }
+            channel: { type: string, enum: ["SMS","Gmail","Both"] }
+            contains: { type: string }
+        reply:
+          type: object
+          properties:
+            template: { type: string }
+            channel: { type: string, enum: ["SMS","Gmail","Both"] }
+
+    RuleList: { type: array, items: { $ref: "#/components/schemas/Rule" } }
+
+    IncomingMessage:
+      type: object
+      required: [clientId, channel, content]
+      properties:
+        clientId: { type: string }
+        channel: { type: string, enum: ["SMS","Gmail"] }
+        content: { type: string }
+
+    AutoReplyResult:
+      type: object
+      properties:
+        matchedRuleId: { type: string, nullable: true }
+        sent:
+          type: object
+          nullable: true
+          properties:
+            channel: { type: string, enum: ["SMS","Gmail","Both"] }
+            content: { type: string }
+
+    # -------- Reports / Settings (existing) --------
     ReportSummary: { type: object, properties: { totalSent:{type:integer}, deliveryRate:{type:number}, autoReplyRate:{type:number}, failedCount:{type:integer} } }
     FailedLog: { type: object, required:[clientId,message,reason,timestamp], properties: { clientId:{type:string}, message:{type:string}, reason:{type:string}, timestamp:{type:string,format:date-time} } }
     FailedLogList: { type: array, items: { $ref: "#/components/schemas/FailedLog" } }

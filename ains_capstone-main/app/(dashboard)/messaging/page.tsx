@@ -37,9 +37,13 @@ function countSmsSegments(text: string) {
   }
 }
 
-// ---- Types for contact fetch (from your OpenAPI) ----
-type Contact =
-  paths["/contacts"]["get"]["responses"]["200"]["content"]["application/json"][number];
+// ---- UI-safe Contact type (avoid OpenAPI unknowns) ----
+type Contact = {
+  id: string;
+  assignedOfficer: string;
+  status: "Active" | "Inactive";
+  lastContact: string;
+};
 
 type RowStatus = "pending" | "sending" | "success" | "error";
 interface RecipientRow {
@@ -81,13 +85,22 @@ export default function MessagingPage() {
         if (!mounted) return;
 
         const raw = (res as any)?.data ?? res;
-        const rows: Contact[] = Array.isArray(raw)
+        const arr: any[] = Array.isArray(raw)
           ? raw
           : Array.isArray(raw?.contacts)
           ? raw.contacts
           : Array.isArray(raw?.items)
           ? raw.items
           : [];
+
+        const rows: Contact[] = arr.map((r) => ({
+          id: String(r?.id ?? ""),
+          assignedOfficer: String(r?.assignedOfficer ?? ""),
+          status: (r?.status === "Active" || r?.status === "Inactive" ? r.status : "Active") as
+            | "Active"
+            | "Inactive",
+          lastContact: String(r?.lastContact ?? ""),
+        }));
 
         setContacts(rows);
       } catch {
