@@ -278,9 +278,9 @@ export default function MessagingPage() {
         >
           Messaging
         </h1>
-        <p className="mt-2 text-sm text-gray-600">
+        {/**<p className="mt-2 text-sm text-gray-600">
           Compose and send SMS/Gmail messages to clients
-        </p>
+        </p>*/} {/**Not needed */}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

@@ -105,10 +105,10 @@ export default function AutoRepliesSection() {
       {/* Intro */}
       <div>
         <h2 className="text-xl font-bold">Auto-Replies (Rules)</h2>
-        <p className="text-sm text-gray-600">
+       {/** <p className="text-sm text-gray-600">
           All rules here apply to <strong>SMS</strong> only. When a client sends an SMS
           that matches your conditions, the system replies automatically using the template below.
-        </p>
+        </p>*/} 
       </div>
 
       {/* Create Rule */}
