@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { LayoutDashboard, Users, MessageSquare, BarChart3, Settings, LogOut } from "lucide-react"
+import { LayoutDashboard, Users, MessageSquare, BarChart3,  Repeat, Settings, LogOut } from "lucide-react"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
 
@@ -12,6 +12,11 @@ const navigation = [
   { name: "Messaging", href: "/messaging", icon: MessageSquare },
   { name: "Reports", href: "/reports", icon: BarChart3 },
   { name: "Settings", href: "/settings", icon: Settings },
+ // { name: "Auto Replies", href: "/settings?tab=auto-replies", icon: Repeat },
+
+
+
+
 ]
 
 export default function Sidebar() {

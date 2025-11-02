@@ -111,6 +111,159 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleList"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Rule"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RulePartial"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/incoming": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["IncomingMessage"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AutoReplyResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/summary": {
         parameters: {
             query?: never;
@@ -272,6 +425,52 @@ export interface components {
             channel: "SMS" | "Gmail" | "Both";
             content: unknown;
             recipients?: unknown;
+        };
+        Rule: {
+            id: string;
+            name: string;
+            enabled: boolean;
+            match: {
+                clientId?: string;
+                /** @enum {string} */
+                channel?: "SMS" | "Gmail" | "Both";
+                contains?: string;
+            };
+            reply: {
+                template?: string;
+                /** @enum {string} */
+                channel?: "SMS" | "Gmail" | "Both";
+            };
+        };
+        RulePartial: {
+            name?: string;
+            enabled?: boolean;
+            match?: {
+                clientId?: string;
+                /** @enum {string} */
+                channel?: "SMS" | "Gmail" | "Both";
+                contains?: string;
+            };
+            reply?: {
+                template?: string;
+                /** @enum {string} */
+                channel?: "SMS" | "Gmail" | "Both";
+            };
+        };
+        RuleList: components["schemas"]["Rule"][];
+        IncomingMessage: {
+            clientId: string;
+            /** @enum {string} */
+            channel: "SMS" | "Gmail";
+            content: string;
+        };
+        AutoReplyResult: {
+            matchedRuleId?: string | null;
+            sent?: {
+                /** @enum {string} */
+                channel?: "SMS" | "Gmail" | "Both";
+                content?: string;
+            } | null;
         };
         ReportSummary: {
             totalSent?: unknown;

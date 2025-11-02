@@ -10,8 +10,13 @@ import { Check, X, RefreshCw, Upload, Download } from "lucide-react";
 import { http } from "@/lib/types/http";
 
 // OpenAPI schema types
-import type { components } from "@/lib/types/api";
-type Contact = components["schemas"]["Contact"]; // { id, assignedOfficer, status, lastContact }
+// Avoid relying on OpenAPI unknowns for UI rendering
+type Contact = {
+  id: string;
+  assignedOfficer: string;
+  status: "Active" | "Inactive";
+  lastContact: string;
+};
 
 export default function ContactsPage() {
   // raw data
@@ -22,7 +27,7 @@ export default function ContactsPage() {
   // filters
   const [q, setQ] = useState("");                 // search (ID contains)
   const [officer, setOfficer] = useState("");     // exact match or "" (all)
-  const [status, setStatus] = useState("");       // "Active" | "Inactive" | ""
+  const [status, setStatus] = useState<"" | "Active" | "Inactive">("");       // filter
 
   // selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -38,15 +43,22 @@ export default function ContactsPage() {
         setLoading(true);
         setError(null);
         const res = await http.get("/contacts");
-        const raw = res?.data;
-
-        const rows: Contact[] = Array.isArray(raw)
+        const raw = (res as any)?.data ?? res;
+        const arr: any[] = Array.isArray(raw)
           ? raw
-          : Array.isArray((raw as any)?.contacts)
-          ? (raw as any).contacts
-          : Array.isArray((raw as any)?.items)
-          ? (raw as any).items
+          : Array.isArray(raw?.contacts)
+          ? raw.contacts
+          : Array.isArray(raw?.items)
+          ? raw.items
           : [];
+        const rows: Contact[] = arr.map((r) => ({
+          id: String(r?.id ?? ""),
+          assignedOfficer: String(r?.assignedOfficer ?? ""),
+          status: (r?.status === "Active" || r?.status === "Inactive" ? r.status : "Active") as
+            | "Active"
+            | "Inactive",
+          lastContact: String(r?.lastContact ?? ""),
+        }));
 
         if (mounted) setContacts(rows);
       } catch (e: any) {
@@ -306,7 +318,7 @@ export default function ContactsPage() {
           <select
             id="status"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => setStatus(e.target.value as "" | "Active" | "Inactive")}
             className="h-10 rounded-md border border-gray-300 px-3 text-sm focus:ring-2 focus:ring-[#E8B86D]"
           >
             <option value="">All</option>
@@ -459,21 +471,22 @@ function parseContactsCsv(text: string): {
 
     const id = String(obj[map.id]).trim();
     const assignedOfficer = String(obj[map.assignedOfficer]).trim();
-    let status = String(obj[map.status]).trim();
+    const statusRaw = String(obj[map.status]).trim();
     const lastContact = String(obj[map.lastContact]).trim();
 
-    if (!id || !assignedOfficer || !status) {
+    if (!id || !assignedOfficer || !statusRaw) {
       skipped++;
       errors.push(`Row ${i + 1}: required fields missing`);
       continue;
     }
 
     // Normalize status
-    if (/^active$/i.test(status)) status = "Active";
-    else if (/^inactive$/i.test(status)) status = "Inactive";
+    let status: "Active" | "Inactive";
+    if (/^active$/i.test(statusRaw)) status = "Active";
+    else if (/^inactive$/i.test(statusRaw)) status = "Inactive";
     else {
       skipped++;
-      errors.push(`Row ${i + 1}: invalid status "${status}" (use Active/Inactive)`);
+      errors.push(`Row ${i + 1}: invalid status "${statusRaw}" (use Active/Inactive)`);
       continue;
     }
 
