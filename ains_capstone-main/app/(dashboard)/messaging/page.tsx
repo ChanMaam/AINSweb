@@ -1,180 +1,297 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, Clock, X, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import {
+  Send,
+  Clock,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  Plus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Input } from "@/components/ui/input";
-import { Inter, Anton } from "next/font/google";
 import { Progress } from "@/components/ui/progress";
+import { Inter, Anton } from "next/font/google";
 
-import { http } from "@/lib/types/http";
-import type { paths } from "@/lib/types/api";
+import { http } from "@/lib/http";
+import { listContacts, type Contact } from "@/lib/services/contacts";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 const anton = Anton({ subsets: ["latin"], weight: ["400"] });
 
+// ---- backend types ----
 type Channel = "" | "sms" | "gmail" | "both";
-const channelMap = { sms: "SMS", gmail: "Gmail", both: "Both" } as const;
+const channelMap: Record<Exclude<Channel, "">, "SMS" | "Gmail" | "Both"> = {
+  sms: "SMS",
+  gmail: "Gmail",
+  both: "Both",
+};
 
-type SendMessageRequest =
-  paths["/messaging/send"]["post"]["requestBody"]["content"]["application/json"];
+type SendMessageRequest = {
+  channel: "SMS" | "Gmail" | "Both";
+  content: string;
+  recipients: string[]; // client IDs
+  subject?: string;
+};
 
-// ---- SMS segment helper (unchanged) ----
+type ScheduleMessageRequest = SendMessageRequest & {
+  scheduledFor: string; // "YYYY-MM-DDTHH:MM"
+};
+
+// shape we use in UI for recent messages
+type RecentMessage = {
+  id: number;
+  clientId: string;
+  channel: "SMS" | "Gmail" | "Both";
+  content: string;
+  createdAt: string;
+  status?: string;
+};
+
+// ---- SMS segment helper ----
 const GSM7_REGEX =
   /^[\n\r !\"#\$%&'\(\)\*\+,\-\.\/0-9:;<=>\?@A-Z_ÄÖÑÜ§¿a-zäöñüà£¥èéùìòÇØøÅåΔΦΓΛΩΠΨΣΘΞ^{}\\\[~\]|€]*$/;
+
 function countSmsSegments(text: string) {
   if (!text) return { charset: "GSM-7", limit: 160, used: 0, segments: 0 };
   const isGsm7 = GSM7_REGEX.test(text);
   if (isGsm7) {
-    if (text.length <= 160) return { charset: "GSM-7", limit: 160, used: text.length, segments: 1 };
-    return { charset: "GSM-7", limit: 153, used: text.length, segments: Math.ceil(text.length / 153) };
+    if (text.length <= 160)
+      return { charset: "GSM-7", limit: 160, used: text.length, segments: 1 };
+    return {
+      charset: "GSM-7",
+      limit: 153,
+      used: text.length,
+      segments: Math.ceil(text.length / 153),
+    };
   } else {
-    if (text.length <= 70) return { charset: "UCS-2", limit: 70, used: text.length, segments: 1 };
-    return { charset: "UCS-2", limit: 67, used: text.length, segments: Math.ceil(text.length / 67) };
+    if (text.length <= 70)
+      return { charset: "UCS-2", limit: 70, used: text.length, segments: 1 };
+    return {
+      charset: "UCS-2",
+      limit: 67,
+      used: text.length,
+      segments: Math.ceil(text.length / 67),
+    };
   }
 }
 
-// ---- UI-safe Contact type (avoid OpenAPI unknowns) ----
-type Contact = {
-  id: string;
-  assignedOfficer: string;
-  status: "Active" | "Inactive";
-  lastContact: string;
-};
-
 type RowStatus = "pending" | "sending" | "success" | "error";
+
 interface RecipientRow {
   id: string;
   status: RowStatus;
   error?: string;
 }
 
+// ---- masking helpers ----
+
+function maskEmail(email?: string | null): string {
+  if (!email) return "";
+  const [user, domain] = email.split("@");
+  if (!domain) return "********";
+  const visible = user.slice(-4); // show last 4 chars
+  const masked = "*".repeat(Math.max(user.length - visible.length, 3));
+  return `${masked}${visible}@${domain}`;
+}
+
+function maskPhone(phone?: string | null): string {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length <= 4) return "*".repeat(digits.length);
+  const visible = digits.slice(-4);
+  const masked = "*".repeat(digits.length - 4);
+  return `${masked}${visible}`;
+}
+
 export default function MessagingPage() {
-  // core fields
+  // message & channel
   const [message, setMessage] = useState("");
+  const [subject, setSubject] = useState("");
   const [channel, setChannel] = useState<Channel>("");
+
+  // scheduling
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
 
-  // officer/clients picker
+  // contacts
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
-  const [selectedOfficer, setSelectedOfficer] = useState<string>("");
-  const [selectedClientIds, setSelectedClientIds] = useState<Set<string>>(new Set());
 
-  // manual recipients (still supported)
-  const [recipientsRaw, setRecipientsRaw] = useState("");
+  // selected client IDs (from Contacts page + added here)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [manualRaw, setManualRaw] = useState("");
+  const [addFromContactsId, setAddFromContactsId] = useState("");
 
-  // bulk progress
+  // sending progress
   const [rows, setRows] = useState<RecipientRow[]>([]);
   const [sending, setSending] = useState(false);
-  const abortRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const abortRef = useRef(false);
 
-  // fetch contacts once (DEFENSIVE NORMALIZATION)
+  // recent messages (from backend)
+  const [recent, setRecent] = useState<RecentMessage[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+
+  // ---- helpers for recent messages ----
+  function normalizeRecent(raw: any): RecentMessage[] {
+    const arr: any[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.items)
+      ? raw.items
+      : [];
+    return arr.map((r, idx) => ({
+      id: Number(r?.id ?? idx),
+      clientId: String(r?.client_code ?? r?.clientId ?? ""),
+      channel:
+        r?.channel === "Gmail" || r?.channel === "Both" ? r.channel : "SMS",
+      content: String(r?.content ?? ""),
+      createdAt: String(r?.created_at ?? r?.createdAt ?? ""),
+      status: r?.status ? String(r.status) : undefined,
+    }));
+  }
+
+  function formatWhen(iso: string) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  }
+
+  async function loadRecent() {
+    try {
+      setRecentLoading(true);
+      const data = await http.get("/messaging/recent");
+      setRecent(normalizeRecent(data));
+    } catch {
+      setRecent([]);
+    } finally {
+      setRecentLoading(false);
+    }
+  }
+
+  // ✅ CLEAR ALL RECENT (with confirm prompt)
+  async function handleClearRecent() {
+    const ok = confirm(
+      "Are you sure you want to delete all recent messages? This cannot be undone."
+    );
+    if (!ok) return;
+
+    try {
+      await http.delete("/messaging/recent");
+      setRecent([]); // instant UI update
+    } catch (e: any) {
+      alert(e?.message || "Failed to clear recent messages.");
+    }
+  }
+
+  // ---- load contacts ----
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
         setLoadingContacts(true);
-        const res = await http.get("/contacts");
+        const data = await listContacts();
         if (!mounted) return;
-
-        const raw = (res as any)?.data ?? res;
-        const arr: any[] = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.contacts)
-          ? raw.contacts
-          : Array.isArray(raw?.items)
-          ? raw.items
-          : [];
-
-        const rows: Contact[] = arr.map((r) => ({
-          id: String(r?.id ?? ""),
-          assignedOfficer: String(r?.assignedOfficer ?? ""),
-          status: (r?.status === "Active" || r?.status === "Inactive" ? r.status : "Active") as
-            | "Active"
-            | "Inactive",
-          lastContact: String(r?.lastContact ?? ""),
-        }));
-
-        setContacts(rows);
+        setContacts(data);
       } catch {
-        setContacts([]); // keep it safe
+        if (!mounted) return;
+        setContacts([]);
       } finally {
         if (mounted) setLoadingContacts(false);
       }
     })();
+
     return () => {
       mounted = false;
     };
   }, []);
 
-  // --- derive officers and filtered clients (DEFENSIVE) ---
-  const officers = useMemo(() => {
-    const list = Array.isArray(contacts) ? contacts : [];
-    return Array.from(new Set(list.map((c) => c.assignedOfficer))).sort();
-  }, [contacts]);
+  // ---- initial load of recent messages ----
+  useEffect(() => {
+    loadRecent();
+  }, []);
 
-  const clientsForOfficer = useMemo(() => {
-    const list = Array.isArray(contacts) ? contacts : [];
-    return selectedOfficer
-      ? list.filter((c) => c.assignedOfficer === selectedOfficer)
-      : list;
-  }, [contacts, selectedOfficer]);
-
-  // Select-all for current officer list
-  const allIdsForOfficer = useMemo(
-    () => clientsForOfficer.map((c) => c.id),
-    [clientsForOfficer]
-  );
-  const allCheckedForOfficer =
-    allIdsForOfficer.length > 0 &&
-    allIdsForOfficer.every((id) => selectedClientIds.has(id));
-
-  function toggleClient(id: string) {
-    setSelectedClientIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-  function toggleSelectAll() {
-    setSelectedClientIds((prev) => {
-      const next = new Set(prev);
-      if (allCheckedForOfficer) {
-        allIdsForOfficer.forEach((id) => next.delete(id));
-      } else {
-        allIdsForOfficer.forEach((id) => next.add(id));
+  // ---- pull recipients from Contacts page (localStorage) ----
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("recipientsDraft");
+      if (!raw) return;
+      const ids: string[] = JSON.parse(raw);
+      if (Array.isArray(ids) && ids.length) {
+        setSelectedIds(new Set(ids.map((x) => String(x))));
       }
-      return next;
-    });
-  }
+    } catch {
+      // ignore parse errors
+    } finally {
+      localStorage.removeItem("recipientsDraft");
+    }
+  }, []);
 
-  // manual ids
+  // manual IDs (extra)
   const manualIds = useMemo(
     () =>
-      recipientsRaw
+      manualRaw
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-    [recipientsRaw]
+    [manualRaw]
   );
 
-  // FINAL RECIPIENTS = selected (checkbox) ∪ manual
+  // final recipients = selected from contacts + manual
   const recipients = useMemo(() => {
-    const set = new Set<string>([...selectedClientIds, ...manualIds]);
+    const set = new Set<string>([...selectedIds, ...manualIds]);
     return Array.from(set);
-  }, [selectedClientIds, manualIds]);
+  }, [selectedIds, manualIds]);
+
+  // resolved contact info (for display)
+  const resolved = useMemo(
+    () =>
+      recipients.map((id) => ({
+        id,
+        contact: contacts.find((c) => c.id === id) || null,
+      })),
+    [recipients, contacts]
+  );
+
+  // options for "Add from contacts" select
+  const availableToAdd = useMemo(
+    () => contacts.filter((c) => !selectedIds.has(c.id)),
+    [contacts, selectedIds]
+  );
+
+  function addSelectedFromContacts() {
+    if (!addFromContactsId) return;
+    setSelectedIds((prev) => new Set(prev).add(addFromContactsId));
+    setAddFromContactsId("");
+  }
+
+  function addAllFromContacts() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      availableToAdd.forEach((c) => next.add(c.id));
+      return next;
+    });
+  }
+
+  function removeSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
 
   // validations
   const smsStats = useMemo(() => countSmsSegments(message), [message]);
-  const hasChannel = !!channel;
+  const hasChannel = channel !== "";
   const hasMessage = message.trim().length > 0;
   const hasRecipients = recipients.length > 0;
   const canSend = hasChannel && hasMessage && hasRecipients && !sending;
@@ -186,63 +303,115 @@ export default function MessagingPage() {
         recipients.length * 350 - (startedAt ? Date.now() - startedAt : 0)
       )
     : 0;
-  const etaLabel =
-    sending && startedAt ? `${Math.ceil(etaMs / 1000)}s remaining` : "";
+  const etaLabel = sending && startedAt ? `${Math.ceil(etaMs / 1000)}s remaining` : "";
 
+  // rows to display (fixes TS error about r.error)
+  const displayRows: RecipientRow[] = useMemo(
+    () =>
+      rows.length
+        ? rows
+        : recipients.map((id) => ({ id, status: "pending" as RowStatus })),
+    [rows, recipients]
+  );
+
+  // ---- SEND NOW ----
   async function handleSendNow() {
-    if (!hasChannel) return alert("Please select a channel");
-    if (!hasRecipients) return alert("Please choose clients or enter Client IDs");
+    if (!hasChannel) return alert("Please select a channel.");
+    if (!hasRecipients) return alert("Please add at least one Client ID.");
     if (!hasMessage) return;
+
+    const payload: SendMessageRequest = {
+      channel: channelMap[channel as Exclude<Channel, "">],
+      content: message,
+      recipients,
+      subject: subject || undefined,
+    };
 
     try {
       setSending(true);
       setStartedAt(Date.now());
       abortRef.current = false;
-
-      const payload: SendMessageRequest = {
-        channel: channelMap[channel],
-        content: message,
-        recipients, // ✅ combined list
-      };
-      await http.post("/messaging/send", payload);
-
-      // simulate per-recipient progress locally
-      const initialRows: RecipientRow[] = recipients.map((id) => ({
-        id,
-        status: "pending",
-      }));
-      setRows(initialRows);
+      setRows(
+        recipients.map((id) => ({
+          id,
+          status: "pending" as RowStatus,
+        }))
+      );
       setProgress(0);
 
-      for (let i = 0; i < initialRows.length; i++) {
+      // call backend (real send / queue)
+      await http.post("/messaging/send", payload);
+
+      // local progress simulation (UI only)
+      for (let i = 0; i < recipients.length; i++) {
         if (abortRef.current) break;
-        setRows((r) => {
-          const copy = [...r];
+
+        setRows((prev) => {
+          const copy = [...prev];
           copy[i] = { ...copy[i], status: "sending" };
           return copy;
         });
+
         await new Promise((res) =>
           setTimeout(res, 220 + Math.floor(Math.random() * 280))
         );
+
         if (abortRef.current) break;
-        const fail = Math.random() < 0.08;
-        setRows((r) => {
-          const copy = [...r];
+
+        const fail = false; // no random failure now
+        setRows((prev) => {
+          const copy = [...prev];
           copy[i] = fail
-            ? { ...copy[i], status: "error", error: "Network timeout" }
+            ? { ...copy[i], status: "error", error: "Failed" }
             : { ...copy[i], status: "success" };
           return copy;
         });
-        setProgress(Math.round(((i + 1) / initialRows.length) * 100));
+
+        setProgress(Math.round(((i + 1) / recipients.length) * 100));
       }
 
-      if (!abortRef.current) setMessage("");
+      if (!abortRef.current) {
+        setMessage("");
+        // keep subject so user can reuse
+        loadRecent();
+      }
     } catch (e: any) {
-      alert(e?.message || "Failed to start bulk send");
+      alert(e?.message || "Failed to send messages.");
     } finally {
       setSending(false);
       abortRef.current = false;
       setStartedAt(null);
+    }
+  }
+
+  async function handleSchedule() {
+    if (!hasChannel) return alert("Please select a channel.");
+    if (!hasRecipients) return alert("Please add at least one Client ID.");
+    if (!hasMessage) return;
+    if (!scheduleDate || !scheduleTime)
+      return alert("Please select schedule date & time.");
+
+    const scheduledFor = `${scheduleDate}T${scheduleTime}`;
+
+    const payload: ScheduleMessageRequest = {
+      channel: channelMap[channel as Exclude<Channel, "">],
+      content: message,
+      recipients,
+      subject: subject || undefined,
+      scheduledFor,
+    };
+
+    try {
+      await http.post("/messaging/schedule", payload);
+      alert(
+        `Message scheduled via ${
+          channelMap[channel as Exclude<Channel, "">]
+        } on ${scheduleDate} ${scheduleTime}.`
+      );
+      setScheduleDate("");
+      setScheduleTime("");
+    } catch (e: any) {
+      alert(e?.message || "Failed to schedule message.");
     }
   }
 
@@ -252,20 +421,9 @@ export default function MessagingPage() {
     setStartedAt(null);
   }
 
-  function handleSchedule() {
-    if (!hasChannel) return alert("Please select a channel");
-    if (!hasRecipients) return alert("Please choose clients or enter Client IDs");
-    if (!scheduleDate || !scheduleTime)
-      return alert("Please select date and time");
-    if (!hasMessage) return;
-    alert(
-      `Message scheduled via ${channelMap[channel]} on ${scheduleDate} ${scheduleTime} (mock scheduler)`
-    );
-  }
-
-  const total = rows.length || recipients.length;
-  const sent = rows.filter((r) => r.status === "success").length;
-  const failed = rows.filter((r) => r.status === "error").length;
+  const total = displayRows.length || recipients.length;
+  const sent = displayRows.filter((r) => r.status === "success").length;
+  const failed = displayRows.filter((r) => r.status === "error").length;
 
   return (
     <div
@@ -278,13 +436,13 @@ export default function MessagingPage() {
         >
           Messaging
         </h1>
-        {/**<p className="mt-2 text-sm text-gray-600">
-          Compose and send SMS/Gmail messages to clients
-        </p>*/} {/**Not needed */}
+        <p className="mt-2 text-sm text-gray-600">
+          Compose and send SMS / Gmail messages using Client IDs from Contacts.
+        </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Left: compose & recipients */}
+        {/* Left 2 cols: compose & status */}
         <div className="space-y-6 lg:col-span-2">
           {/* Compose card */}
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
@@ -294,7 +452,7 @@ export default function MessagingPage() {
 
             <div className="space-y-4">
               {/* Channel */}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <Label className="text-[#0C1D40] font-medium">
                   Select Channel
                 </Label>
@@ -319,93 +477,135 @@ export default function MessagingPage() {
                 </RadioGroup>
               </div>
 
-              {/* OFFICER + CLIENTS PICKER */}
+              {/* Email subject */}
+              <div className="space-y-2">
+                <Label htmlFor="subject" className="text-[#0C1D40] font-medium">
+                  Email Subject (for Gmail)
+                </Label>
+                <Input
+                  id="subject"
+                  placeholder="e.g. AINS Notification for your upcoming schedule"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="h-11 rounded-lg border-gray-300 focus:ring-2 focus:ring-[#E8B86D]"
+                />
+                <p className="text-xs text-gray-500">
+                  Used when channel is <strong>Gmail</strong> or{" "}
+                  <strong>Both</strong>. Leave empty to use the system&apos;s
+                  default subject.
+                </p>
+              </div>
+
+              {/* Recipients from contacts */}
               <div className="space-y-2">
                 <Label className="text-[#0C1D40] font-medium">
-                  Recipients by Officer
+                  Recipients (from Contacts)
                 </Label>
 
-                {/* Officer select */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
                   <select
-                    value={selectedOfficer}
-                    onChange={(e) => {
-                      setSelectedOfficer(e.target.value);
-                      // keep existing manual selections
-                    }}
-                    className="h-11 w-full rounded-lg border border-gray-300 px-3 text-sm focus:ring-2 focus:ring-[#E8B86D]"
+                    value={addFromContactsId}
+                    onChange={(e) => setAddFromContactsId(e.target.value)}
+                    className="h-11 flex-1 min-w-[200px] rounded-lg border border-gray-300 px-3 text-sm focus:ring-2 focus:ring-[#E8B86D]"
+                    disabled={loadingContacts || availableToAdd.length === 0}
                   >
                     <option value="">
-                      {loadingContacts ? "Loading officers..." : "All Officers"}
+                      {loadingContacts
+                        ? "Loading contacts..."
+                        : availableToAdd.length === 0
+                        ? "No more contacts to add"
+                        : "Select contact to add"}
                     </option>
-                    {officers.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
+                    {availableToAdd.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.id} • {c.name}
                       </option>
                     ))}
                   </select>
-
                   <Button
                     type="button"
                     variant="outline"
-                    className="whitespace-nowrap"
-                    onClick={toggleSelectAll}
-                    disabled={clientsForOfficer.length === 0}
+                    className="gap-1"
+                    onClick={addSelectedFromContacts}
+                    disabled={!addFromContactsId}
                   >
-                    {allCheckedForOfficer ? "Unselect All" : "Select All"}
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={addAllFromContacts}
+                    disabled={availableToAdd.length === 0}
+                  >
+                    <Plus className="h-4 w-4" /> Add all
                   </Button>
                 </div>
 
-                {/* Clients list (checkboxes) */}
-                <div className="max-h-40 overflow-auto rounded border border-gray-200 p-3">
-                  {clientsForOfficer.length === 0 ? (
+                {/* list of selected recipients */}
+                <div className="max-h-40 overflow-auto rounded border border-gray-200 p-3 bg-gray-50">
+                  {resolved.length === 0 ? (
                     <div className="text-sm text-gray-500">
-                      No clients{" "}
-                      {selectedOfficer ? `for ${selectedOfficer}` : "available"}.
+                      Use Contacts page (&ldquo;Use in Messaging&rdquo;) or add
+                      clients above.
                     </div>
                   ) : (
-                    <div className="grid sm:grid-cols-2 gap-2">
-                      {clientsForOfficer.map((c) => (
-                        <label
-                          key={c.id}
-                          className="flex items-center gap-2 text-sm cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={selectedClientIds.has(c.id)}
-                            onChange={() => toggleClient(c.id)}
-                          />
-                          <span className="font-medium">{c.id}</span>
-                          <span className="text-gray-500">
-                            • {c.assignedOfficer}
-                          </span>
-                        </label>
-                      ))}
+                    <div className="space-y-1">
+                      {resolved.map(({ id, contact }) => {
+                        const emailMasked = contact?.email
+                          ? maskEmail(contact.email)
+                          : "";
+                        const phoneMasked = contact?.phone
+                          ? maskPhone(contact.phone)
+                          : "";
+                        const info =
+                          emailMasked && phoneMasked
+                            ? `${emailMasked} • ${phoneMasked}`
+                            : emailMasked || phoneMasked || "No contact info";
+
+                        return (
+                          <div
+                            key={id}
+                            className="flex items-center justify-between text-sm bg-white rounded-md px-2 py-1"
+                          >
+                            <div>
+                              <span className="font-semibold mr-1">{id}</span>
+                              {contact && (
+                                <span className="text-gray-500">
+                                  • {contact.name} • {info}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeSelected(id)}
+                              className="text-xs text-red-500 hover:text-red-700"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
-                <div className="text-xs text-gray-500">
-                  Checked clients will be included. You can still add manual
-                  Client IDs below.
-                </div>
               </div>
 
-              {/* Manual Client IDs (kept) */}
+              {/* Manual IDs */}
               <div className="space-y-2">
-                <Label htmlFor="recipients" className="text-[#0C1D40] font-medium">
+                <Label htmlFor="manualIds" className="text-[#0C1D40] font-medium">
                   Additional Client IDs (comma-separated)
                 </Label>
                 <Input
-                  id="recipients"
-                  placeholder="e.g. PPA-12345, PPA-67890"
-                  value={recipientsRaw}
-                  onChange={(e) => setRecipientsRaw(e.target.value)}
+                  id="manualIds"
+                  placeholder="e.g. PPA-00001, PPA-00002"
+                  value={manualRaw}
+                  onChange={(e) => setManualRaw(e.target.value)}
                   className="h-11 rounded-lg border-gray-300 focus:ring-2 focus:ring-[#E8B86D]"
                 />
               </div>
 
-              {/* Message */}
+              {/* Message content */}
               <div className="space-y-2">
                 <Label htmlFor="message" className="text-[#0C1D40] font-medium">
                   Message Content
@@ -426,8 +626,29 @@ export default function MessagingPage() {
                 </div>
               </div>
 
+              {/* Schedule */}
+              <div className="space-y-2">
+                <Label className="text-[#0C1D40] font-medium">
+                  Schedule (optional)
+                </Label>
+                <div className="flex gap-3 flex-wrap">
+                  <Input
+                    type="date"
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    className="h-11 w-40 rounded-lg border-gray-300 focus:ring-2 focus:ring-[#E8B86D]"
+                  />
+                  <Input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="h-11 w-32 rounded-lg border-gray-300 focus:ring-2 focus:ring-[#E8B86D]"
+                  />
+                </div>
+              </div>
+
               {/* Actions */}
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-3 pt-2 flex-wrap">
                 <Button
                   onClick={handleSendNow}
                   disabled={!canSend}
@@ -440,15 +661,17 @@ export default function MessagingPage() {
                   )}
                   {sending ? "Sending..." : "Send Now"}
                 </Button>
+
                 <Button
                   onClick={handleSchedule}
-                  disabled={!hasMessage || !hasChannel || !hasRecipients}
+                  disabled={!hasChannel || !hasMessage || !hasRecipients}
                   variant="outline"
                   className="gap-2 border-[#0C1D40] text-[#0C1D40] hover:bg-[#0C1D40] hover:text-white"
                 >
                   <Clock className="h-4 w-4" />
                   Schedule Message
                 </Button>
+
                 {sending && (
                   <Button
                     onClick={handleCancel}
@@ -463,7 +686,7 @@ export default function MessagingPage() {
           </div>
 
           {/* Progress & per-recipient statuses */}
-          {(rows.length > 0 || sending) && (
+          {(displayRows.length > 0 || sending) && (
             <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
               <div className="flex items-center justify-between mb-4">
                 <h2 className={`text-xl font-bold ${anton.className}`}>
@@ -481,10 +704,7 @@ export default function MessagingPage() {
               </div>
 
               <div className="max-h-64 overflow-auto divide-y">
-                {(rows.length
-                  ? rows
-                  : recipients.map((id) => ({ id, status: "pending" as const }))
-                ).map((r, i) => (
+                {displayRows.map((r, i) => (
                   <div
                     key={`${r.id}-${i}`}
                     className="py-2 flex items-center justify-between"
@@ -520,49 +740,61 @@ export default function MessagingPage() {
           )}
         </div>
 
-        {/* Right: sidebar (unchanged) */}
+        {/* Right: recent messages (from backend) */}
         <div className="rounded-2xl border border-[#0C1D40] bg-[#0C1D40] p-6 shadow-md">
-          <h2
-            className={`text-xl font-bold mb-4 text-[#E8B86D] ${anton.className}`}
-          >
-            Recent Messages
-          </h2>
-          <div className="space-y-4">
-            {[
-              {
-                time: "10 min ago",
-                recipient: "All Clients",
-                preview: "Reminder: Court hearing tomorrow at 9 AM",
-              },
-              {
-                time: "1 hour ago",
-                recipient: "PPA-12345",
-                preview: "Please confirm your attendance for...",
-              },
-              {
-                time: "2 hours ago",
-                recipient: "Officer Santos' Group",
-                preview: "Monthly check-in scheduled for next week",
-              },
-              {
-                time: "Yesterday",
-                recipient: "Active Clients",
-                preview: "Important: Update your contact information",
-              },
-            ].map((msg, index) => (
-              <div key={index} className="border-b border-white/10 pb-3 last:border-0">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold text-white">
-                    {msg.recipient}
-                  </span>
-                  <span className="text-xs text-gray-300">{msg.time}</span>
-                </div>
-                <p className="text-sm text-gray-200 line-clamp-2">
-                  {msg.preview}
-                </p>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className={`text-xl font-bold text-[#E8B86D] ${anton.className}`}>
+              Recent Messages
+            </h2>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearRecent}
+              disabled={recentLoading || recent.length === 0}
+              className="border-[#E8B86D] text-[#E8B86D] hover:bg-[#E8B86D] hover:text-[#0C1D40]"
+            >
+              Clear All
+            </Button>
           </div>
+
+          {recentLoading ? (
+            <div className="text-sm text-gray-200 flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading…
+            </div>
+          ) : recent.length === 0 ? (
+            <div className="text-sm text-gray-300">
+              No messages sent yet. Once you send messages, they will appear
+              here.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recent.map((msg) => (
+                <div
+                  key={msg.id}
+                  className="border-b border-white/10 pb-3 last:border-0"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold text-white">
+                      {msg.clientId || "Unknown client"} • {msg.channel}
+                    </span>
+                    <span className="text-xs text-gray-300">
+                      {formatWhen(msg.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-200 line-clamp-2">
+                    {msg.content}
+                  </p>
+                  {msg.status && (
+                    <p className="text-[11px] text-gray-300 mt-0.5">
+                      Status: {msg.status}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
